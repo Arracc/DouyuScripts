@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Douyu全站礼物红包监控
 // @namespace    http://tampermonkey.net/
-// @version      1.7.0
+// @version      1.8.0
 // @description  try to take over the world!
 // @author       You
 // @match        https://www.douyu.com/japi/interactnc/web/propredpacket/*
@@ -16,7 +16,7 @@
 // 1.5.0 修复获取数据失败后没有正常轮询及回归的问题；新增网络故障通知
 // 1.6.0 新增红包历史记录功能，记录周期为当月（500鱼翅以上）
 // 1.7.0 新增在线获取粉丝徽章名单功能，无法在线获取时（无痕模式）则从本地获取，首次使用且无法在线获取时需要手动提交名单保存
-// 1.8.0 替换异步请求方式，隐藏COOKIE，合并在线/离线/匿名模式；整合自动抢红包功能，当月所有红包信息，礼物处理方式将被记录。
+// 1.8.0 替换异步请求方式，隐藏COOKIE，合并在线/离线/匿名模式；整合自动抢红包功能，当月红包信息，礼物处理方式将被记录。
 
 let loginState; //登陆状态
 let remainItem = new Map();
@@ -24,26 +24,27 @@ let noLimit = [];
 let fansLimit = [];
 let fansLimitAvailable = [];
 let notificationFlag = false; //通知标记，在每个获取数据周期展示数据后
-let switchFlag = true; //开关标记
+let notifyFollowed = false;
 let notifyMethod = 'desktop'; //通知方式
-let notifyAmount = 500;
+let notifyAmount = 2001;
 let notifiedActivityIds = []; //所有已通知的活动ID
 let syncActivityId = ''; //本周期内更新时间时可以参与且需要同步到标题的粉丝团活动的活动ID
+let switchFlag = true; //开关标记
 let telegramBotToken = ''; //TG Bot Token
-let startTime = 9;
-let endTime = 1;
+let telegramChatId=''; //TG chat id
+let startTime = 8;
+let endTime = 2;
 let powerFlag = true; //运行状态标记，用于控制台输出状态 true:正在运行 false:暂停运行
 let startCountTime = Date.parse(new Date()); //本轮倒计时开始的时间，即本地时间毫秒值
 let currentTime; //本次逻辑判断/更新时间时本地时间毫秒值
 let intervalFactor = 20000; //用于计算随机时间的基数，实际间隔在reloaTime ± intervalFactor之内 题外：该变量需前置声明，才能在let actualReloadTime 中使用
-let presetReloadTime = 100;
+let presetReloadTime = 140;
 let actualReloadTime = 999;
 let nextReloadTime = 999; //距离下次获取数据时间
 let runningTime = 0; //持续运行时间，距上次获取数据后运行时间 即前两者间消耗的时间
 let interruptionFlag = false; //网络故障标记
 let retryTimes = 0; //故障重连次数
-let offsetTime = 2000; //系统时间修正
-
+let offsetTime = 0; //系统修正时间，服务器时间与本地时间之差加上时间提前量的总偏移值，通常服务器时间较快，该值为正数
 let followListInited = false;
 let fansBadgeListInited = false;
 let followList = [];
@@ -62,72 +63,70 @@ function loginStateCheck() {
 
 //数据初始化
 function initData() {
-    telegramBotToken = (localTelegramBotToken = localStorage.getItem('telegramBotToken')) == null ? '' : localTelegramBotToken;
 
-    // presetReloadTime = loginState ? 300 : 100;
+    telegramBotToken = (localTelegramBotToken = localStorage.getItem('telegramBotToken')) == null ? '' : localTelegramBotToken;
+    telegramChatId = (localTelegramChatId = localStorage.getItem('telegramChatId')) == null ? '' : localTelegramChatId;
+
     actualReloadTime = presetReloadTime + getRandomInterval();
 
     // 初始化关注名单，要获取分页
-    // if (loginState) {
-    //     let totalPage = 1;
-    //     let n = 0; //处理响应次数
-    //     let xhr = new XMLHttpRequest();
-    //     xhr.open('GET', 'https://www.douyu.com/room/follow', true);
-    //     xhr.send();
-    //     xhr.onreadystatechange = function () {
-    //         if (xhr.readyState == 4 && xhr.status == 200) {
-    //             let response = xhr.responseText;
-    //             let htmlElement = document.createElement('div');
-    //             htmlElement.innerHTML = response;
-    //             let nodes = htmlElement.getElementsByTagName('span');
-    //             for (let node of nodes) {
-    //                 if (node.getAttribute('class') == 'username') {
-    //                     followList.push(node.innerText);
-    //                 } else if (node.getAttribute('id') == 'totalRecords') {
-    //                     // 获取页码
-    //                     totalPage = node.innerText.replace(/[^0-9]/ig, "");
-    //                 }
-    //             }
-    //             n += 1;
-    //             // 多页
-    //             if (totalPage > 1) {
-    //                 for (let page = 2; page <= totalPage; page++) {
-    //                     let xhr = new XMLHttpRequest();
-    //                     xhr.open('GET', 'https://www.douyu.com/room/follow?page=' + page, true);
-    //                     xhr.send();
-    //                     xhr.onreadystatechange = function () {
-    //                         if (xhr.readyState == 4 && xhr.status == 200) {
-    //                             let response = xhr.responseText;
-    //                             let htmlElement = document.createElement('div');
-    //                             htmlElement.innerHTML = response;
-    //                             let nodes = htmlElement.getElementsByTagName('span');
-    //                             for (let node of nodes) {
-    //                                 if (node.getAttribute('class') == 'username') {
-    //                                     followList.push(node.innerText);
-    //                                 }
-    //                             }
-    //                             n += 1;
-    //                             if (n == totalPage) {
-    //                                 localStorage.setItem('followList', JSON.stringify(followList));
-    //                                 followListInited = true;
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //             if (n == totalPage) {
-    //                 localStorage.setItem('followList', JSON.stringify(followList));
-    //                 followListInited = true;
-    //             }
-    //         }
-    //     }
-    // } else {
-    //     followList = (localFollowList = JSON.parse(localStorage.getItem('followList'))) == null ? [] : localFollowList;
-    //     followListInited = true;
-    // }
-
-    followList = (localFollowList = JSON.parse(localStorage.getItem('followList'))) == null ? [] : localFollowList;
-    followListInited = true;
+    if (false) {
+        let totalPage = 1;
+        let n = 0; //处理响应次数
+        let xhr = new XMLHttpRequest();
+        xhr.open('GET', 'https://www.douyu.com/room/follow', true);
+        xhr.send();
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState == 4 && xhr.status == 200) {
+                let response = xhr.responseText;
+                let htmlElement = document.createElement('div');
+                htmlElement.innerHTML = response;
+                let nodes = htmlElement.getElementsByTagName('span');
+                for (let node of nodes) {
+                    if (node.getAttribute('class') == 'username') {
+                        followList.push(node.innerText);
+                    } else if (node.getAttribute('id') == 'totalRecords') {
+                        // 获取页码
+                        totalPage = node.innerText.replace(/[^0-9]/ig, "");
+                    }
+                }
+                n += 1;
+                // 多页
+                if (totalPage > 1) {
+                    for (let page = 2; page <= totalPage; page++) {
+                        let xhr = new XMLHttpRequest();
+                        xhr.open('GET', 'https://www.douyu.com/room/follow?page=' + page, true);
+                        xhr.send();
+                        xhr.onreadystatechange = function () {
+                            if (xhr.readyState == 4 && xhr.status == 200) {
+                                let response = xhr.responseText;
+                                let htmlElement = document.createElement('div');
+                                htmlElement.innerHTML = response;
+                                let nodes = htmlElement.getElementsByTagName('span');
+                                for (let node of nodes) {
+                                    if (node.getAttribute('class') == 'username') {
+                                        followList.push(node.innerText);
+                                    }
+                                }
+                                n += 1;
+                                if (n == totalPage) {
+                                    localStorage.setItem('followList', JSON.stringify(followList));
+                                    followListInited = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (n == totalPage) {
+                    localStorage.setItem('followList', JSON.stringify(followList));
+                    followListInited = true;
+                }
+            }
+        }
+    } else {
+        followList = (localFollowList = JSON.parse(localStorage.getItem('followList'))) == null ? [] : localFollowList;
+        followListInited = true;
+    }
 
     //初始化粉丝徽章名单，每次启动先在线获取名单，获取不到则读取本地，本地读取不到则为空
     if (loginState) {
@@ -166,10 +165,7 @@ function initData() {
     }
 }
 
-//读取记录
-function loadRecords() {
-    return (records_ = localStorage.getItem(("0" + (new Date().getMonth() + 1)).slice(-2) + '.records')) == null ? '' : records_;
-}
+
 
 function initControlPanel() {
     //添加标题
@@ -183,14 +179,15 @@ function initControlPanel() {
     let controlModuleElement = document.createElement('div');
     controlModuleElement.id = 'controlModule';
     let html = '';
-    html += '<div style="height:25px;"><span>TelegramBot令牌：<input id="telegramBotToken" value=' + telegramBotToken + '></input></span>&nbsp;<a href="javascript:void(0)" onclick="setTelegramBotToken()" style="text-decoration:none;">确定</a>&nbsp;<span>(如不清楚TelegramBot用法请不要使用TG通知)</span></div>';
+    html += '<div style="height:25px;"><span>TelegramBotToken：<input id="telegramBotToken" value=' + telegramBotToken + '></input></span>&nbsp;<a href="javascript:void(0)" onclick="setTelegramBotToken()" style="text-decoration:none;">确定</a>&nbsp;<span>(如不使用TG通知可以不填)</span></div>';
+    html += '<div style="height:25px;"><span>TelegramChatId：<input id="telegramChatId" value=' + telegramChatId + '></input></span>&nbsp;<a href="javascript:void(0)" onclick="setTelegramChatId()" style="text-decoration:none;">确定</a>&nbsp;<span>(如不使用TG通知可以不填)</span></div>';
     html += '<div style="height:25px;"><span>登录状态：' + (loginState ? '在线' : '离线/匿名') + '</span></div>';
-    html += '<div style="height:25px;"><span style="display:inline-block;width:180px;">运行状态：<span id="powerStatus" style="width:200px">桌面通知</span></span><span>开关：</span><a href="javascript:void(0)" onclick="switchPower(this)" style="text-decoration:none;">桌面通知</a>&nbsp;<a href="javascript:void(0)" onclick="switchPower(this)" style="text-decoration:none;">TG通知</a>&nbsp;|&nbsp;<a href="javascript:void(0)" onclick="switchPower(this)" style="text-decoration:none;">停止</a></div>';
+    html += '<div style="height:25px;"><span style="display:inline-block;width:180px;">运行状态：<span id="powerStatus" style="width:200px">桌面通知</span></span><span>开关：</span><a href="javascript:void(0)" onclick="switchPower(this)" style="text-decoration:none;">桌面通知</a>&nbsp;<a href="javascript:void(0)" onclick="switchPower(this)" style="text-decoration:none;">TG通知</a>&nbsp;|&nbsp;<a href="javascript:void(0)" onclick="switchPower(this)" style="text-decoration:none;">停止</a>&nbsp;<span>(如未设置TelegramBot请不要使用TG通知)</span></div>';
     html += '<div style="height:25px;"><span style="display:inline-block;width:180px;">运行时间：<span id="startTimeSpan">' + startTime + '</span>点&nbsp;-&nbsp;<span id="endTimeSpan">' + endTime + '</span>点</span><span>设置：</span><input id="startTime" style="width:50px;">&nbsp;-&nbsp;<input id="endTime" style="width:50px;">&nbsp;<a href="javascript:void(0)" onclick="setRunTime()" style="text-decoration:none;">确定</a></div>';
-    html += '<div style="height:25px;"><span style="display:inline-block;width:180px;">通知金额：<span id="notifyAmount">' + notifyAmount + '</span></span><span>设置：</span><a href="javascript:void(0)" onclick="switchNotifyAmount(this)" style="text-decoration:none;">100</a>&nbsp;<a href="javascript:void(0)" onclick="switchNotifyAmount(this)" style="text-decoration:none;">500</a>&nbsp;<a href="javascript:void(0)" onclick="switchNotifyAmount(this)" style="text-decoration:none;">2000</a></div>';
+    html += '<div style="height:25px;"><span style="display:inline-block;width:180px;">通知金额：<span id="notifyAmount">不通知</span></span><span>设置：</span><a href="javascript:void(0)" value="2001" onclick="switchNotifyAmount(this)" style="text-decoration:none;">不通知</a>&nbsp;<a href="javascript:void(0)" value="100" onclick="switchNotifyAmount(this)" style="text-decoration:none;">100</a>&nbsp;<a href="javascript:void(0)" value="500" onclick="switchNotifyAmount(this)" style="text-decoration:none;">500</a>&nbsp;<a href="javascript:void(0)" value="2000" onclick="switchNotifyAmount(this)" style="text-decoration:none;">2000</a></div>';
     html += '<div style="height:25px;"><span style="display:inline-block;width:180px;">预设刷新时间：<span id="presetReloadTime">' + presetReloadTime + '</span>秒</span><span>设置：</span><span><input id="newReloadTime" type="text" style="width:50px;"/>&nbsp;秒</span>&nbsp;<a href="javascript:void(0)" onclick="setReloadTime()" style="text-decoration:none;">确定</a></div>';
     html += '<div style="height:25px;"><span style="display:inline-block;width:370px;;">实际刷新时间：<span id="actualReloadTime">' + actualReloadTime + '</span>秒，距离下次刷新时间：<span id="nextReloadTime">' + nextReloadTime + '</span>秒</span><a href="javascript:void(0)" onclick="reload()" style="text-decoration:none;">立即刷新</a></div>';
-    html += '<div style="height:25px;"><span style="display:inline-block;width:180px;">系统时间修正：<span id="offsetTime">' + offsetTime + '</span>秒</span><span>设置：</span><span><input id="offsetTime" type="text" style="width:50px;"/>&nbsp;秒</span>&nbsp;<a href="javascript:void(0)" onclick="setOffsetTime()" style="text-decoration:none;">确定</a></div>';
+    html += '<div style="height:25px;"><span style="display:inline-block;width:2000px;">系统修正时间：<span id="offsetTime">' + offsetTime + '</span>毫秒</span></div>';
     html += '<div style="height:25px;"><span>关注名单：</span><input id="followList" value="' + followList + '" style="width:600px;">&nbsp;&nbsp;<a href="javascript:void(0)" onclick="saveFollowList()" style="text-decoration:none;">保存</a>&nbsp;<span>(使用英文逗号,分隔)</span></div>';
     html += '<div style="height:25px;"><span>粉丝徽章名单：</span><input id="fansBadgeList" value="' + fansBadgeList + '" style="width:600px;">&nbsp;&nbsp;<a href="javascript:void(0)" onclick="saveFansBadgeList()" style="text-decoration:none;">保存</a>&nbsp;<span>(使用英文逗号,分隔)</span></div>';
     html += '<div>===========================================================</div>';
@@ -261,11 +258,17 @@ function initRecordModule() {
     document.querySelector('div#recordModule').appendChild(recordListElement);
 }
 
-//按键函数
+//按钮组件
 //设置TelegramBot Token
 setTelegramBotToken = function () {
     telegramBotToken = document.querySelector('input#telegramBotToken').value;
     localStorage.setItem('telegramBotToken', telegramBotToken);
+}
+
+//设置TelegramBot Token
+setTelegramChatId = function () {
+    telegramChatId = document.querySelector('input#telegramChatId').value;
+    localStorage.setItem('telegramChatId', telegramChatId);
 }
 
 //切换运行开关
@@ -294,14 +297,14 @@ setRunTime = function () {
     endTime = parseInt(document.querySelector("input#endTime").value);
     document.querySelector("span#startTimeSpan").innerText = startTime;
     document.querySelector("span#endTimeSpan").innerText = endTime;
-    console.log('设置运行时间为：' + startTime + ' - ' + endTime);
+    console.log('设置运行时间为：' + startTime + ' - ' + endTime + '点');
     //修改运行时间后重新判定powerFlag
 }
 
 //设置通知金额
 switchNotifyAmount = function (obj) {
-    notifyAmount = Number(obj.innerText);
-    document.querySelector('span#notifyAmount').innerText = notifyAmount;
+    notifyAmount = obj.getAttribute('value');
+    document.querySelector('span#notifyAmount').innerText = obj.innerText;
     console.log('设置通知金额为：' + notifyAmount)
 }
 
@@ -314,16 +317,8 @@ setReloadTime = function () {
         document.querySelector("span#presetReloadTime").innerText = newReloadTime;
         document.querySelector("span#actualReloadTime").innerText = actualReloadTime;
         actualReloadTime = 0;
-        console.log('设置刷新时间：' + newReloadTime)
+        console.log('设置刷新时间：' + newReloadTime + '秒')
     }
-}
-
-//设置补偿时间
-setOffsetTime = function(){
-    let newOffsetTime = document.querySelector("input#newOffsetTime").value;
-    offsetTime = newOffsetTime;
-    document.querySelector("span#offsetTime").innerText = newOffsetTime;
-    console.log('设置补偿时间：' + newOffsetTime)
 }
 
 //保存关注名单
@@ -363,95 +358,6 @@ switchRecordDisplay = function (btn) {
         document.querySelector('a#recordShowBtn').innerHTML = '显示';
     }
 }
-
-//功能组件
-//通知组件
-function checkNotify(notificationBody) {
-    if (notificationFlag) { // 判断是否有通知事件
-        if (notifyMethod == 'desktop') {
-            desktopNotify(notificationBody);
-        } else if (notifyMethod == 'TG') {
-            TGNotify(notificationBody);
-        }
-    }
-
-    // 桌面通知组件
-    function desktopNotify(str) {
-        // window.onload = function () {
-        suportNotify();
-        // }
-
-        //判断浏览器是否支持Web Notifications API
-        function suportNotify() {
-            if (window.Notification) {
-                // 支持
-                // console.log("支持" + "Web Notifications API");
-                //如果支持Web Notifications API，再判断浏览器是否支持弹出实例
-                showMess();
-            } else {
-                // 不支持
-                alert("不支持 Web Notifications API");
-            }
-        }
-        //判断浏览器是否支持弹出实例
-        function showMess() {
-            setTimeout(function () {
-                // console.log('1：' + Notification.permission);
-                //如果支持window.Notification 并且 许可不是拒绝状态
-                if (window.Notification && Notification.permission !== "denied") {
-                    //Notification.requestPermission这是一个静态方法，作用就是让浏览器出现是否允许通知的提示
-                    Notification.requestPermission(function (status) {
-                        // console.log('2: ' + status);
-                        //如果状态是同意
-                        if (status === "granted") {
-                            var m = new Notification('收到信息', {
-                                body: str,　　//消息体内容
-                                //icon:"images/img1.jpg"　　//消息图片
-                            });
-                            m.onclick = function () {//点击当前消息提示框后，跳转到当前页面
-                                window.focus();
-                            }
-                        } else {
-                            alert('当前浏览器不支持弹出消息')
-                        }
-                    });
-                }
-            }, 1000)
-        }
-    }
-
-    // TG通知组件
-    function TGNotify(str) {
-        var xmlhttp = new XMLHttpRequest();
-        xmlhttp.open('GET', 'https://api.telegram.org/' + telegramBotToken + '/sendMessage?chat_id=-1001419288479&text=' + str, true);
-        xmlhttp.send();
-    }
-}
-
-// 计算随机数组件
-function getRandomInterval() {
-    let sign = Math.random() > 0.5 ? 1 : -1;
-    let interval = Math.random() * intervalFactor * sign; //生成正负随机数
-    // console.info("生成的随机时间是：" + interval / 1000 + "秒");
-    return Math.round(interval / 1000);
-}
-
-// 阻塞等待组件
-function sleep(time) {
-    return new Promise(function (resolve, reject) {
-        runningTime = runningTime + time / 1000;
-        setTimeout(resolve, time);
-    })
-}
-
-// 计时器
-function getRunningTime() {
-    // currentTime = Date.parse(new Date());
-    return ((Date.parse(new Date())) - startCountTime) / 1000;
-}
-
-
-
 
 // 判断逻辑
 async function judge() {
@@ -591,38 +497,7 @@ function modifyTime() {
     judge(); //每次更新后先进入判断逻辑，否则需要在当前函数加入刷新时间判定
 }
 
-// 请求数据组件
-// function getData() {
-//     let xhr = new XMLHttpRequest();
-//     xhr.open('GET', 'https://www.douyu.com/japi/interactnc/web/propredpacket/getPrpList?type_id=2&room_id=9999', true);
-//     xhr.send();
-//     xhr.onreadystatechange = function () {
-//         if (xhr.readyState == 4 && xhr.status == 200) {
-//             let response = xhr.responseText;
-//             if (interruptionFlag) {
-//                 interruptionFlag = false;
-//                 retryTimes = 0;
-//             }
-//             startCountTime = Date.parse(new Date());
-//             let json = JSON.parse(response);
-//             // 上传到数据库
-//             setTimeout(start(json), 0); // 获取到数据再调用start()，如果在start()中发起异步请求，需要面对异步获取数据不及时，同步主线程卡死的问题
-//         }
-//     }
-//     xhr.onerror = async function () {
-//         if (!interruptionFlag) {
-//             interruptionFlag = true;
-//             console.info('请求程序异常，10秒后重试');
-//             checkNotify('请求程序异常，10秒后重试');
-//             notificationFlag = true;
-//         }
-//         retryTimes += 1;
-//         document.title = '故障重连中(' + retryTimes + ')';
-//         await sleep(10000);
-//         setTimeout(judge, 0);
-//     }
-// }
-
+// 获取数据组件
 function getData() {
     fetch("https://www.douyu.com/japi/interactnc/web/propredpacket/getPrpList?type_id=2&room_id=" + rid, {
         method: 'GET',
@@ -653,25 +528,31 @@ function getData() {
         })
 }
 
+let currentRet;
 function start(ret) {
     runningTime = 0;
     let path = "https://www.douyu.com/";
     let title;
     let notificationBody;
-    let jsonArr;
     let syncCdTime;
-    //获取JSON数据列表数组形式
+
+    //首次加载从页面获取JSON数据
     if (ret === undefined) {
         ret = JSON.parse(document.querySelector("pre").innerText);
         document.querySelector("pre").style.display = "none";
-    } 
-    if (ret.data.list.length > 0) {
-        setTimeout(add_To_Get_Red_Envelope_List(ret), 0);
-    } //添加到自动抢红包
-    jsonArr = ret.data.list;
+    }
 
-    // 挂载数据
-    jsonArr.forEach((v, i) => {
+    currentRet = ret; //备后用
+
+    //添加到自动抢红包
+    if (ret.data.list.length > 0) {
+        //调整补偿时间
+        setOffsetTime(ret);
+        setTimeout(add_To_Get_Red_Envelope_List(ret), 0);
+    }
+
+    //挂载数据
+    ret.data.list.forEach((v, i) => {
         // 构建子节点
         let joinc; //参与条件
         let status; //开始状态
@@ -701,11 +582,7 @@ function start(ret) {
         };
 
         // 判断开始时间
-        if (cdTime == 0) {
-            cdTime = '已开始';
-        } else {
-            remainItem.set(activityId, nn);
-        };
+        cdTime == 0 ? cdTime = '已开始' : remainItem.set(activityId, nn);
 
         // 添加子节点
         let activityElement = document.createElement('div');
@@ -725,7 +602,7 @@ function start(ret) {
         // 收礼人判定
         if ((followList.indexOf(nn) > -1 && (joinc == '全部水友' || joinc == '关注')) || fansBadgeList.indexOf(nn) > -1) {
             html += '</div><span>' + uname + ' 在 <font style="color:red">' + nn + '</font> 直播间送出<span></div>';
-            if (!notificationFlag && notifiedActivityIds.indexOf(activityId) < 0) {
+            if (!notificationFlag && notifiedActivityIds.indexOf(activityId) < 0 && notifyFollowed) {
                 notificationFlag = true;
                 notificationBody = '发现关注名单 ' + nn + ' ，距离开始时间还有 ' + cdTime + ' 秒';
                 notifiedActivityIds.push(activityId);
@@ -764,7 +641,7 @@ function start(ret) {
     if (noLimit.length == 0 && fansLimit.length == 0) {
         document.querySelector('div#noLimitList').innerHTML = '<div><font style="font-weight:bold;">无限制：暂无</font></div>';
         document.querySelector('div#fansLimitList').innerHTML = '<div><font style="font-weight:bold;">粉丝团：暂无</font></div>';
-        title = '未发现红包';
+        title = '暂无';
     } else if (noLimit.length == 0 && fansLimit.length != 0) {
         document.querySelector('div#noLimitList').innerHTML = '<div><font style="font-weight:bold;">无限制：暂无</font></div>';
         title = '无:0 | 粉:' + fansLimit.length + '(' + (syncCdTime == undefined ? '不可参与' : syncCdTime) + ')';
@@ -782,6 +659,115 @@ function start(ret) {
 
     //完成一次加载，重新判断
     judge();
+}
+
+//功能组件
+//通知组件
+function checkNotify(notificationBody) {
+    if (notificationFlag) { // 判断是否有通知事件
+        if (notifyMethod == 'desktop') {
+            desktopNotify(notificationBody);
+        } else if (notifyMethod == 'TG') {
+            TGNotify(notificationBody);
+        }
+    }
+
+    // 桌面通知组件
+    function desktopNotify(str) {
+        // window.onload = function () {
+        suportNotify();
+        // }
+
+        //判断浏览器是否支持Web Notifications API
+        function suportNotify() {
+            if (window.Notification) {
+                // 支持
+                // console.log("支持" + "Web Notifications API");
+                //如果支持Web Notifications API，再判断浏览器是否支持弹出实例
+                showMess();
+            } else {
+                // 不支持
+                alert("不支持 Web Notifications API");
+            }
+        }
+        //判断浏览器是否支持弹出实例
+        function showMess() {
+            setTimeout(function () {
+                // console.log('1：' + Notification.permission);
+                //如果支持window.Notification 并且 许可不是拒绝状态
+                if (window.Notification && Notification.permission !== "denied") {
+                    //Notification.requestPermission这是一个静态方法，作用就是让浏览器出现是否允许通知的提示
+                    Notification.requestPermission(function (status) {
+                        // console.log('2: ' + status);
+                        //如果状态是同意
+                        if (status === "granted") {
+                            var m = new Notification('收到信息', {
+                                body: str,　　//消息体内容
+                                //icon:"images/img1.jpg"　　//消息图片
+                            });
+                            m.onclick = function () {//点击当前消息提示框后，跳转到当前页面
+                                window.focus();
+                            }
+                        } else {
+                            alert('当前浏览器不支持弹出消息')
+                        }
+                    });
+                }
+            }, 1000)
+        }
+    }
+
+    // TG通知组件
+    function TGNotify(str) {
+        var xmlhttp = new XMLHttpRequest();
+        xmlhttp.open('GET', 'https://api.telegram.org/' + telegramBotToken + '/sendMessage?chat_id=' + telegramChatId + 'text=' + str, true);
+        xmlhttp.send();
+    }
+}
+
+// 计算随机数组件
+function getRandomInterval() {
+    let sign = Math.random() > 0.5 ? 1 : -1;
+    let interval = Math.random() * intervalFactor * sign; //生成正负随机数
+    return Math.round(interval / 1000);
+}
+
+//设置补偿时间
+function setOffsetTime(ret) {
+    for (let v of ret.data.list) {
+        if (v.cdtime > 0) {
+            let differenceSystemTime = (Math.round(new Date().getTime() / 1000) - (Number(v.startTime) - Number(v.cdtime))) * 1000;
+            offsetTime = differenceSystemTime - 1500;
+            document.querySelector("span#offsetTime").innerText = offsetTime;
+            break;
+        }
+    }
+
+}
+
+//读取记录
+function loadRecords() {
+    return (records_ = localStorage.getItem(("0" + (new Date().getMonth() + 1)).slice(-2) + '.records')) == null ? '' : records_;
+}
+
+// 保存记录
+function saveRecords() {
+    let date = new Date();
+    records = document.querySelector('div#recordList').innerHTML;
+    localStorage.setItem(("0" + (date.getMonth() + 1)).slice(-2) + '.records', records)
+}
+
+// 阻塞等待组件
+function sleep(time) {
+    return new Promise(function (resolve, reject) {
+        runningTime = runningTime + time / 1000;
+        setTimeout(resolve, time);
+    })
+}
+
+// 计时器
+function getRunningTime() {
+    return ((Date.parse(new Date())) - startCountTime) / 1000;
 }
 
 //移植自动抢红包，自动赠送
@@ -831,7 +817,7 @@ let red_Envelope_Status;
 let red_Envelope_Arr = [];
 let my_Follow_Room = followList;
 // var rid = url.substring(ridPos + urlLen, url.indexOf(';', ridPos + urlLen));
-let rid = 501761
+let rid = 501761;
 
 //添加到抢红包队列
 function add_To_Get_Red_Envelope_List(ret) {
@@ -843,7 +829,7 @@ function add_To_Get_Red_Envelope_List(ret) {
         let offset = red_Envelope_Arr.indexOf(rpid);
         let startTime = ret.data.list[i].startTime;
         let to = Number(startTime) - Math.round(new Date().getTime() / 1000);
-        to = 1000 * to - 6000; //ttt
+        to = 1000 * to + offsetTime; //ttt
         if (offset == -1) {
             red_Envelope_Arr.push(ret.data.list[i].activityid);
             if (joinc == 0) {
@@ -895,7 +881,7 @@ function add_To_Get_Red_Envelope_List(ret) {
                     }
                 })
             }
-            makeRecord(ret.data.list[i].startTime,rpid, nn, ret.data.list[i].yc, joinc)
+            makeRecord(ret.data.list[i].startTime, rpid, nn, ret.data.list[i].yc, joinc)
         }
     }
 }
@@ -913,7 +899,7 @@ function add_Get_Red_Envelope(rpid, reid, to, nn) {
             get_Red_Envelope(rpid);
             get_Red_Envelope(rpid);
             // showMessage("【礼物红包】抢红包执行完毕！", "success");
-            console.log('【礼物红包】抢红包执行完毕！');
+            console.log('【礼物红包】抢红包执行完毕！ ==> ' + nn);
             choose_Gift(reid, nn, rpid);
         }, to);
     } else {
@@ -921,7 +907,7 @@ function add_Get_Red_Envelope(rpid, reid, to, nn) {
         get_Red_Envelope(rpid);
         get_Red_Envelope(rpid);
         // showMessage("【礼物红包】抢红包执行完毕！", "success");
-        console.log('【礼物红包】抢红包执行完毕！');
+        console.log('【礼物红包】抢红包执行完毕！ ==> ' + nn);
         choose_Gift(reid, nn, rpid);
     }
 }
@@ -965,6 +951,8 @@ async function choose_Gift(reid, nn, rpid) {
                                 red_Envelopes_Gifts["办卡"] -= 1;
                                 let t = new Date().getTime();
                                 // insert_gift_log(979, reid, t-10000, nn);
+                                notificationFlag = true;
+                                checkNotify('获得办卡');
                                 console.log("【办卡】来自==>" + reid);
                                 updateGiftStatus(rpid, '办卡', 'keep')
                             }
@@ -975,7 +963,7 @@ async function choose_Gift(reid, nn, rpid) {
                             console.log("Send【666】==>" + reid);
                             send_Gift_Bag(978, 1, reid, nn);
                         }
-                        updateGiftStatus(rpid, '办卡', 'sended')
+                        updateGiftStatus(rpid, '666', 'sended')
                     } else if (gift_id == 975) {
                         red_Envelopes_Gifts_New["大气"] += gift_count;
                         if (red_Envelopes_Gifts_New["大气"] > red_Envelopes_Gifts["大气"]) {
@@ -989,6 +977,8 @@ async function choose_Gift(reid, nn, rpid) {
                             let t = new Date().getTime();
                             // insert_gift_log(979, reid, t-10000, nn);
                             console.log("【飞机】来自==>" + reid);
+                            notificationFlag = true;
+                            checkNotify('获得飞机');
                         }
                         updateGiftStatus(rpid, '飞机', 'keep')
                     } else if (gift_id == 981) {
@@ -997,6 +987,8 @@ async function choose_Gift(reid, nn, rpid) {
                             let t = new Date().getTime();
                             // insert_gift_log(981, reid, t-10000, nn);
                             console.log("【火箭】来自==>" + reid);
+                            notificationFlag = true;
+                            checkNotify('获得火箭');
                         }
                         updateGiftStatus(rpid, '火箭', 'keep')
                     }
@@ -1012,7 +1004,7 @@ function send_Gift_Bag(gid, count, reid, nn) {
     // 送背包里的东西
     // gid: 268是荧光棒
     // count: 数量
-    // rid: 房间号
+    // reid: 房间号
     return fetch("https://www.douyu.com/japi/prop/donate/mainsite/v1", {
         method: 'POST',
         mode: 'no-cors',
@@ -1061,23 +1053,24 @@ function check_Follow_Room(reid, to) {
 
 async function check_Red_Envelope_Room(reid) {
     let red_Envelope_Room_Arr = [];
-    await fetch("https://www.douyu.com/japi/interactnc/web/propredpacket/getPrpList?type_id=2&room_id=" + rid, {
-        method: 'GET',
-        mode: 'no-cors',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    }).then(res => {
-        return res.json();
-    }).then(ret => {
-        if (ret.data.list.length > 0) {
-            for (let i = 0; i < ret.data.list.length; i++) {
-                let red_packet_rid = ret.data.list[i].rid;
-                if (red_Envelope_Room_Arr.indexOf(red_packet_rid) < 0) {
-                    red_Envelope_Room_Arr.push(red_packet_rid);
-                }
+    // await fetch("https://www.douyu.com/japi/interactnc/web/propredpacket/getPrpList?type_id=2&room_id=" + rid, {
+    //     method: 'GET',
+    //     mode: 'no-cors',
+    //     credentials: 'include',
+    //     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    // }).then(res => {
+    //     return res.json();
+    // }).then(ret => {
+    let ret = currentRet;
+    if (ret.data.list.length > 0) {
+        for (let i = 0; i < ret.data.list.length; i++) {
+            let red_packet_rid = ret.data.list[i].rid;
+            if (red_Envelope_Room_Arr.indexOf(red_packet_rid) < 0) {
+                red_Envelope_Room_Arr.push(red_packet_rid);
             }
         }
-    })
+    }
+    // })
     let room_status = red_Envelope_Room_Arr.indexOf(reid);
     let follow_status = my_Follow_Room.indexOf(reid);
     if (room_status == -1) {
@@ -1104,7 +1097,13 @@ function rm_Follow_Room(reid) {
     };
 }
 
-function makeRecord(startTime,rpid, nn, yc, joinc) {
+function makeRecord(startTime, rpid, nn, yc, joinc) {
+    //清理上月记录
+    let localRecords = loadRecords();
+    if (localRecords == '') {
+        document.querySelector('div#recordList').innerHTML = '';
+    }
+
     let date = new Date(startTime * 1000);
     localDate = ("0" + (date.getMonth() + 1)).slice(-2) + '/' + ("0" + date.getDate()).slice(-2) + ' ' + ("0" + date.getHours()).slice(-2) + ':' + ("0" + date.getMinutes()).slice(-2);
     // 参与条件
@@ -1124,28 +1123,21 @@ function makeRecord(startTime,rpid, nn, yc, joinc) {
     };
     let recordElement = document.createElement('div');
     recordElement.id = 'record' + rpid;
-    let newRecord = localDate + '&nbsp;&nbsp;&nbsp;&nbsp;' + '<span>' + nn + '</span>' + '&nbsp;&nbsp;&nbsp;&nbsp;' + '<span>' + yc/100 + '</span>' + '&nbsp;&nbsp;&nbsp;&nbsp;'
-         + '<span>' + joinc + '</span>' + '&nbsp;&nbsp;&nbsp;&nbsp;' + '<span id="giftstatus'+rpid+'"></span>' + '&nbsp;&nbsp;&nbsp;&nbsp;' + '<span id="sendstatus' + rpid + '"></span>';
+    let newRecord = '<span style="display:inline-block;width:110px;">' + localDate + '</span>' + '<span style="display:inline-block;width:170px;">' + nn + '</span>'
+        + '<span style="display:inline-block;width:50px;">' + yc / 100 + '</span>' + '<span style="display:inline-block;width:120px;">' + joinc + '</span>'
+        + '<span id="giftstatus' + rpid + '" style="display:inline-block;width:50px;"></span>' + '<span id="sendstatus' + rpid + '" style="display:inline-block;width:50px;"></span>';
     recordElement.innerHTML = newRecord;
-    document.querySelector('div#recordList').appendChild(recordElement);
-
-    records = loadRecords();
-    records += '<div>' + newRecord + '</div>';
-    saveRecords(records);
+    firstChildElement = document.querySelector('div#recordList').firstChild;
+    document.querySelector('div#recordList').insertBefore(recordElement, firstChildElement);
+    // document.querySelector('div#recordList').appendChild(recordElement);
+    saveRecords();
 }
 
 //提交礼物状态
 function updateGiftStatus(rpid, gift, sendstatus) {
     document.querySelector('span#giftstatus' + rpid).innerText = gift;
     document.querySelector('span#sendstatus' + rpid).innerText = sendstatus;
-    records = document.querySelector('div#recordList').innerHTML;
-    saveRecords(records);
-}
-
-// 保存记录
-function saveRecords(records) {
-    let date = new Date();
-    localStorage.setItem(("0" + (date.getMonth() + 1)).slice(-2) + '.records', records)
+    saveRecords();
 }
 
 function getCCN() {

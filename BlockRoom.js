@@ -9,8 +9,8 @@
 // @grant        none
 // ==/UserScript==
 
-var blockGames = ["拾遗记","逃离塔科夫","怪物猎人",];
-var blockRoomIds = ["/2768658","/110174","/5132174"];
+var blockGames = ["","","",]; //游戏名
+var blockRoomIds = ["","",""]; //房间ID，以/+id格式
 var count = 0;
 
 
